@@ -25,7 +25,7 @@ public class Benchmarking {
     //https://docs.jboss.org/drools/release/7.19.0.Final/drools-docs/html_single/ 
     private static final Logger logger = Logger.getLogger(Benchmarking.class.getName());
 
-    private final static int NUM_OF_THREADS = 1000;
+    private final static int NUM_OF_THREADS = 400;
     private static BufferedWriter bwriter;
 
     public static void main(String[] args) {

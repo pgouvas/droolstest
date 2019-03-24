@@ -1,0 +1,818 @@
+
+package eu.ubitech.drools.rules;
+
+import eu.ubitech.drools.Util
+import eu.ubitech.drools.om.Clazz
+import eu.ubitech.drools.om.ObjectProperty
+import eu.ubitech.drools.om.InstanceOfClazz
+import eu.ubitech.drools.om.LogicalError
+import eu.ubitech.drools.om.KnowledgeTriple
+import eu.ubitech.drools.om.Advice
+import eu.ubitech.drools.om.Clazz
+import eu.ubitech.drools.om.LogicalError
+import eu.ubitech.drools.om.KnowledgeTriple
+import eu.ubitech.drools.om.InstanceOfClazz
+import eu.ubitech.drools.om.CombinedAdvice;
+
+rule "inference-1-Class Transitiveness Inference"
+ when
+     $clazz: Clazz( parent != null , parent.parent != null  )
+     not ( exists(  Clazz( name==$clazz.name , parent == $clazz.parent.parent ) ) )
+ then
+ //    System.out.println( "Class Transitiveness --> New Class has to be created with name: "+ $clazz.getName() +" and parent: "+$clazz.getParent().getParent().getName() );
+     Clazz newclazz = new Clazz($clazz.getName(),$clazz.getParent().getParent());
+     insert(newclazz);
+ end
+
+
+ rule "inference-2-Supertype Inheritance Inference"
+ when
+
+     $instance: InstanceOfClazz( clazz.parent !=null   )
+     not ( exists(  InstanceOfClazz( name==$instance.name , clazz == clazz.parent ) ) )
+ then
+ //    System.out.println( "Supertype Inheritance --> New InstanceOfClass has to be created with name: "+ $instance.getName() +" and class: "+$instance.getClazz().getParent().getName() );
+     InstanceOfClazz newinstanceofclazz = new InstanceOfClazz($instance.getName(),$instance.getClazz().getParent());
+     insert(newinstanceofclazz);
+ end
+
+
+ rule "inference-3-Consistency Checking of Knowledge Triples based on Domain Restrictions"
+ when
+     $triple: KnowledgeTriple()
+     not ( exists(  InstanceOfClazz( name == $triple.subject.name , clazz == $triple.predicate.domain ) ) )
+ then
+     System.out.println( "Modelling Error! Invalid Triple1: " + $triple );
+     retract($triple);
+ end
+
+ rule "inference-4-Consistency Checking of Knowledge Triples based on Range Restrictions"
+ when
+     $triple: KnowledgeTriple()
+     not ( exists(  InstanceOfClazz( name == $triple.object.name  , clazz == $triple.predicate.range  ) ) )
+ then
+     System.out.println( "Modelling Error! Invalid Triple2: " + $triple );
+     retract($triple);
+ end
+
+
+ rule "inference-5-Consistency Checking of Sub-Property Definition based on Domain Restrictions"
+ when
+     $op: ObjectProperty( parent != null )
+     eval ( Util.isClassSubclassOfClass($op.getDomain(), $op.getParent().getDomain() ) == false )
+ then
+     System.out.println( "Modelling Error! Invalid Object Sub-Property based on Domain Restrictions: " + $op );
+     LogicalError error = new LogicalError("Modelling Error! Invalid Object Sub-Property based on Domain Restrictions: " + $op );
+     retract($op);
+     insert(error);
+ end
+
+ rule "inference-6-Consistency Checking of Sub-Property Definition based on Range Restrictions"
+ when
+     $op: ObjectProperty( parent != null )
+     eval ( Util.isClassSubclassOfClass($op.getRange(), $op.getParent().getRange() ) == false )
+ then
+     System.out.println( "Modelling Error! Invalid Object Sub-Property based on Range Restrictions: " + $op );
+     retract($op);
+ end
+
+
+ rule "inference-7-Knowledge Expansion through Range Generalization (make use of Supertype inheritance)"
+ when
+     $triple: KnowledgeTriple()
+     $objectinstance: InstanceOfClazz(name == $triple.object.name, clazz != $triple.object.clazz )
+     not (
+         exists(
+             $newtriple: KnowledgeTriple( predicate == $triple.predicate , subject == $triple.subject, object.name == $triple.object.name , object.clazz != $triple.object.clazz  )
+         )
+     )
+ then
+ //    System.out.println( "Knowledge Expansion through Range Generalization  --> New Triple has to be created Predicate:"+$triple.getPredicate().getName()+" Subject: "+$triple.getSubject().getName() +"( "+$triple.getSubject().getClazz().getName()+" )"+" Object: "+$objectinstance.getName() + " ( "+$objectinstance.getClazz().getName()+" )" );
+     KnowledgeTriple newtriple = new KnowledgeTriple( $triple.getSubject() , $triple.getPredicate() , $objectinstance );
+     insert(newtriple);
+ end
+
+
+ rule "inference-8-Knowledge Expansion through Domain Generalization (make use of Supertype inheritance)"
+ when
+     $triple: KnowledgeTriple()
+     $subjectinstance: InstanceOfClazz(name == $triple.subject.name, clazz != $triple.subject.clazz )
+     not (
+         exists(
+             $newtriple: KnowledgeTriple( predicate == $triple.predicate , object == $triple.object, subject.name == $triple.subject.name , subject.clazz != $triple.subject.clazz  )
+         )
+     )
+ then
+ //    System.out.println( "Knowledge Expansion through Domain Generalization --> New Triple has to be created Predicate:"+$triple.getPredicate().getName()+" Subject: "+$subjectinstance.getName() +"("+$subjectinstance.getClazz().getName()+")"+" Object: "+$triple.getObject().getName() +"("+$triple.getObject().getClazz().getName()+")" );
+     KnowledgeTriple newtriple = new KnowledgeTriple( $subjectinstance , $triple.getPredicate() , $triple.getObject() );
+     insert(newtriple);
+ end
+
+
+ rule "inference-9-Knowledge Expansion through Transitive Property Interpretation"
+ when
+     $pred: ObjectProperty(transitive == true )
+     $triple1: KnowledgeTriple( predicate == $pred , $subject1: subject , $object1: object )
+     $triple2: KnowledgeTriple( predicate == $pred , subject == $object1)
+
+     not (
+         exists(
+             KnowledgeTriple( predicate == $pred , subject == $triple1.subject, object == $triple2.object  )
+         )
+     )
+ then
+ //    System.out.println( "Knowledge Expansion through Transitive Property   --> New Triple has to be created Predicate:"+$pred.getName()+" Subject: "+$triple1.getSubject().getName()+"("+$triple1.getSubject().getClazz().getName()+") Object: "+$triple2.getObject().getName()+"("+$triple2.getObject().getClazz().getName()+")" );
+     KnowledgeTriple newtriple = new KnowledgeTriple( $triple1.getSubject() , $pred , $triple2.getObject() );
+     insert(newtriple);
+ end
+
+
+ rule "inference-10-Knowledge Expansion through Sub-Property Generalization"
+ when
+     $pred: ObjectProperty( parent != null )
+     $triple: KnowledgeTriple( predicate == $pred , $subject1: subject , $object1: object )
+
+     not (
+         exists(
+             KnowledgeTriple( predicate == $pred.parent , subject == $triple.subject, object == $triple.object  )
+         )
+     )
+ then
+ //    System.out.println( "Knowledge Expansion through Sub-Property Generalization --> New Triple has to be created Predicate:"+$pred.getParent().getName()+" Subject: "+$triple.getSubject().getName()+"("+$triple.getSubject().getClazz().getName()+") Object: "+$triple.getObject().getName()+"("+$triple.getObject().getClazz().getName()+")" );
+     KnowledgeTriple newtriple = new KnowledgeTriple( $triple.getSubject() , $pred.getParent() , $triple.getObject() );
+     insert(newtriple);
+ end
+
+
+ ///// Combining algorithms
+
+
+ rule "combining-DefaultPermitAll"
+ when
+     $req: InstanceOfClazz( clazz.name == "Request" )
+     $adv: Advice( requestid ==  $req.getName() )
+         not ( exists(  Advice( $adv.getAdvice()=="negative" , requestid == $req.getName() ) ) )
+
+ then
+//     System.out.println("Combining Permit All: " + $req.getName());
+//     System.out.println("based on advice: " + $adv);
+     CombinedAdvice combadvice = new CombinedAdvice("positive", $req.getName() );
+     insert(combadvice);
+//     System.out.println("Combining PermitAll: " + $req.getName()+" positive");
+ end
+
+ rule "combining-DefaultPermitAll-Negation"
+ when
+     $req: InstanceOfClazz( clazz.name == "Request" )
+     $adv: Advice( requestid ==  $req.getName() )
+         not ( exists(  Advice( $adv.getAdvice()=="positive" , requestid == $req.getName() ) ) )
+
+ then
+//     System.out.println("Combining Permit All: " + $req.getName());
+//     System.out.println("based on advice: " + $adv);
+     CombinedAdvice combadvice = new CombinedAdvice("negative", $req.getName() );
+     insert(combadvice);
+//     System.out.println("Combining PermitAll-Negation: " + $req.getName()+" negative");
+ end
+
+
+// rule "Debug-PrintAllClasses"
+// when
+//     $clazz: Clazz()
+// then
+//     System.out.println( "Clazz --> "+$clazz  );
+// end
+ 
+
+ //rule "Debug-PrintAllInstances"
+ //when
+ //    $instanceofclass: InstanceOfClazz()
+ //then
+ //    System.out.println( "InstanceOfClazz --> "+$instanceofclass  );
+ //end
+ //
+ //rule "Debug-PrintAllObjectProperties"
+ //when
+ //    $objectproperty: ObjectProperty()
+ //then
+ //    System.out.println( "ObjectProperty --> "+$objectproperty  );
+ //end
+ //
+ //rule "Debug-PrintAllTriples"
+ //when
+ //    $triple: KnowledgeTriple()
+ //then
+ //    System.out.println( "KnowledgeTriple --> "+$triple  );
+ //end
+
+rule "ABAC1 Rule"
+
+when    
+    
+    $req: InstanceOfClazz( clazz.name =='Request')    
+    
+    $pred1: ObjectProperty( name == 'requestHasSubject' )
+    $pred2: ObjectProperty( name == 'requestHasObject' )
+    $pred3: ObjectProperty( name == 'requestHasAction' )   
+    $pred4: ObjectProperty( name == 'requestHasIP' )   
+    
+    $tr1: KnowledgeTriple( subject == $req , predicate == $pred1 , $object1: object)      
+    $tr2: KnowledgeTriple( subject == $req , predicate == $pred2 , $object2: object)          
+    $tr3: KnowledgeTriple( subject == $req , predicate == $pred3 , $object3: object)          
+    $tr4: KnowledgeTriple( subject == $req , predicate == $pred4 , $object4: object)          
+    
+    
+    eval ($object1.getName() == 'requestor1')   and
+    eval ($object2.getName() == 'resource1')    and
+    eval ($object3.getName() == 'action1')      and (
+        //expression
+        eval ($object4.getName() == 'ip1') or eval ($object4.getName() == 'ip2') or eval ($object4.getName() == 'ip3') or eval ($object4.getName() == 'ip4') or eval ($object4.getName() == 'ip5') or eval ($object4.getName() == 'ip6') or eval ($object4.getName() == 'ip7') or eval ($object4.getName() == 'ip8') or eval ($object4.getName() == 'ip9') or eval ($object4.getName() == 'ip10')
+    )
+    
+then
+    Advice advice = new Advice('positive', $req.getName() );
+    insert(advice);
+    //System.out.println( "ABAC1 Positive Advice for request: "+$req.getName());
+end    
+    
+
+rule "ABAC1 Negation"
+
+when    
+    
+    $req: InstanceOfClazz( clazz.name =='Request')    
+    
+    $pred1: ObjectProperty( name == 'requestHasSubject' )
+    $pred2: ObjectProperty( name == 'requestHasObject' )
+    $pred3: ObjectProperty( name == 'requestHasAction' )   
+    $pred4: ObjectProperty( name == 'requestHasIP' )   
+    
+    $tr1: KnowledgeTriple( subject == $req , predicate == $pred1 , $object1: object)      
+    $tr2: KnowledgeTriple( subject == $req , predicate == $pred2 , $object2: object)          
+    $tr3: KnowledgeTriple( subject == $req , predicate == $pred3 , $object3: object)          
+    $tr4: KnowledgeTriple( subject == $req , predicate == $pred4 , $object4: object)          
+    
+    not (
+        eval ($object1.getName() == 'requestor1')   and
+        eval ($object2.getName() == 'resource1')    and
+        eval ($object3.getName() == 'action1')      and (
+            //expression
+        eval ($object4.getName() == 'ip1') or eval ($object4.getName() == 'ip2') or eval ($object4.getName() == 'ip3') or eval ($object4.getName() == 'ip4') or eval ($object4.getName() == 'ip5') or eval ($object4.getName() == 'ip6') or eval ($object4.getName() == 'ip7') or eval ($object4.getName() == 'ip8') or eval ($object4.getName() == 'ip9') or eval ($object4.getName() == 'ip10')
+        )
+    )
+then
+    Advice advice = new Advice('negative', $req.getName() );
+    insert(advice);
+ //   System.out.println( "ABAC1 Negative Advice for request: "+$req.getName());
+end         
+
+rule "ABAC2 Rule"
+
+when    
+    
+    $req: InstanceOfClazz( clazz.name =='Request')    
+    
+    $pred1: ObjectProperty( name == 'requestHasSubject' )
+    $pred2: ObjectProperty( name == 'requestHasObject' )
+    $pred3: ObjectProperty( name == 'requestHasAction' )   
+    $pred4: ObjectProperty( name == 'requestHasIP' )   
+    
+    $tr1: KnowledgeTriple( subject == $req , predicate == $pred1 , $object1: object)      
+    $tr2: KnowledgeTriple( subject == $req , predicate == $pred2 , $object2: object)          
+    $tr3: KnowledgeTriple( subject == $req , predicate == $pred3 , $object3: object)          
+    $tr4: KnowledgeTriple( subject == $req , predicate == $pred4 , $object4: object)          
+    
+    
+    eval ($object1.getName() == 'requestor2')   and
+    eval ($object2.getName() == 'resource1')    and
+    eval ($object3.getName() == 'action1')      and (
+        //expression
+        eval ($object4.getName() == 'ip1') or eval ($object4.getName() == 'ip2') or eval ($object4.getName() == 'ip3') or eval ($object4.getName() == 'ip4') or eval ($object4.getName() == 'ip5') or eval ($object4.getName() == 'ip6') or eval ($object4.getName() == 'ip7') or eval ($object4.getName() == 'ip8') or eval ($object4.getName() == 'ip9') or eval ($object4.getName() == 'ip10')
+    )
+    
+then
+    Advice advice = new Advice('positive', $req.getName() );
+    insert(advice);
+    //System.out.println( "ABAC2 Positive Advice for request: "+$req.getName());
+end    
+    
+
+rule "ABAC2 Negation"
+
+when    
+    
+    $req: InstanceOfClazz( clazz.name =='Request')    
+    
+    $pred1: ObjectProperty( name == 'requestHasSubject' )
+    $pred2: ObjectProperty( name == 'requestHasObject' )
+    $pred3: ObjectProperty( name == 'requestHasAction' )   
+    $pred4: ObjectProperty( name == 'requestHasIP' )   
+    
+    $tr1: KnowledgeTriple( subject == $req , predicate == $pred1 , $object1: object)      
+    $tr2: KnowledgeTriple( subject == $req , predicate == $pred2 , $object2: object)          
+    $tr3: KnowledgeTriple( subject == $req , predicate == $pred3 , $object3: object)          
+    $tr4: KnowledgeTriple( subject == $req , predicate == $pred4 , $object4: object)          
+    
+    not (
+        eval ($object1.getName() == 'requestor2')   and
+        eval ($object2.getName() == 'resource1')    and
+        eval ($object3.getName() == 'action1')      and (
+            //expression
+        eval ($object4.getName() == 'ip1') or eval ($object4.getName() == 'ip2') or eval ($object4.getName() == 'ip3') or eval ($object4.getName() == 'ip4') or eval ($object4.getName() == 'ip5') or eval ($object4.getName() == 'ip6') or eval ($object4.getName() == 'ip7') or eval ($object4.getName() == 'ip8') or eval ($object4.getName() == 'ip9') or eval ($object4.getName() == 'ip10')
+        )
+    )
+then
+    Advice advice = new Advice('negative', $req.getName() );
+    insert(advice);
+    //System.out.println( "ABAC2 Negative Advice for request: "+$req.getName());
+end         
+
+rule "ABAC3 Rule"
+
+when    
+    
+    $req: InstanceOfClazz( clazz.name =='Request')    
+    
+    $pred1: ObjectProperty( name == 'requestHasSubject' )
+    $pred2: ObjectProperty( name == 'requestHasObject' )
+    $pred3: ObjectProperty( name == 'requestHasAction' )   
+    $pred4: ObjectProperty( name == 'requestHasIP' )   
+    
+    $tr1: KnowledgeTriple( subject == $req , predicate == $pred1 , $object1: object)      
+    $tr2: KnowledgeTriple( subject == $req , predicate == $pred2 , $object2: object)          
+    $tr3: KnowledgeTriple( subject == $req , predicate == $pred3 , $object3: object)          
+    $tr4: KnowledgeTriple( subject == $req , predicate == $pred4 , $object4: object)          
+    
+    
+    eval ($object1.getName() == 'requestor3')   and
+    eval ($object2.getName() == 'resource1')    and
+    eval ($object3.getName() == 'action1')      and (
+        //expression
+        eval ($object4.getName() == 'ip1') or eval ($object4.getName() == 'ip2') or eval ($object4.getName() == 'ip3') or eval ($object4.getName() == 'ip4') or eval ($object4.getName() == 'ip5') or eval ($object4.getName() == 'ip6') or eval ($object4.getName() == 'ip7') or eval ($object4.getName() == 'ip8') or eval ($object4.getName() == 'ip9') or eval ($object4.getName() == 'ip10')
+    )
+    
+then
+    Advice advice = new Advice('positive', $req.getName() );
+    insert(advice);
+    //System.out.println( "ABAC3 Positive Advice for request: "+$req.getName());
+end    
+    
+
+rule "ABAC3 Negation"
+
+when    
+    
+    $req: InstanceOfClazz( clazz.name =='Request')    
+    
+    $pred1: ObjectProperty( name == 'requestHasSubject' )
+    $pred2: ObjectProperty( name == 'requestHasObject' )
+    $pred3: ObjectProperty( name == 'requestHasAction' )   
+    $pred4: ObjectProperty( name == 'requestHasIP' )   
+    
+    $tr1: KnowledgeTriple( subject == $req , predicate == $pred1 , $object1: object)      
+    $tr2: KnowledgeTriple( subject == $req , predicate == $pred2 , $object2: object)          
+    $tr3: KnowledgeTriple( subject == $req , predicate == $pred3 , $object3: object)          
+    $tr4: KnowledgeTriple( subject == $req , predicate == $pred4 , $object4: object)          
+    
+    not (
+        eval ($object1.getName() == 'requestor3')   and
+        eval ($object2.getName() == 'resource1')    and
+        eval ($object3.getName() == 'action1')      and (
+            //expression
+        eval ($object4.getName() == 'ip1') or eval ($object4.getName() == 'ip2') or eval ($object4.getName() == 'ip3') or eval ($object4.getName() == 'ip4') or eval ($object4.getName() == 'ip5') or eval ($object4.getName() == 'ip6') or eval ($object4.getName() == 'ip7') or eval ($object4.getName() == 'ip8') or eval ($object4.getName() == 'ip9') or eval ($object4.getName() == 'ip10')
+        )
+    )
+then
+    Advice advice = new Advice('negative', $req.getName() );
+    insert(advice);
+    //System.out.println( "ABAC3 Negative Advice for request: "+$req.getName());
+end         
+
+rule "ABAC4 Rule"
+
+when    
+    
+    $req: InstanceOfClazz( clazz.name =='Request')    
+    
+    $pred1: ObjectProperty( name == 'requestHasSubject' )
+    $pred2: ObjectProperty( name == 'requestHasObject' )
+    $pred3: ObjectProperty( name == 'requestHasAction' )   
+    $pred4: ObjectProperty( name == 'requestHasIP' )   
+    
+    $tr1: KnowledgeTriple( subject == $req , predicate == $pred1 , $object1: object)      
+    $tr2: KnowledgeTriple( subject == $req , predicate == $pred2 , $object2: object)          
+    $tr3: KnowledgeTriple( subject == $req , predicate == $pred3 , $object3: object)          
+    $tr4: KnowledgeTriple( subject == $req , predicate == $pred4 , $object4: object)          
+    
+    
+    eval ($object1.getName() == 'requestor4')   and
+    eval ($object2.getName() == 'resource1')    and
+    eval ($object3.getName() == 'action1')      and (
+        //expression
+        eval ($object4.getName() == 'ip1') or eval ($object4.getName() == 'ip2') or eval ($object4.getName() == 'ip3') or eval ($object4.getName() == 'ip4') or eval ($object4.getName() == 'ip5') or eval ($object4.getName() == 'ip6') or eval ($object4.getName() == 'ip7') or eval ($object4.getName() == 'ip8') or eval ($object4.getName() == 'ip9') or eval ($object4.getName() == 'ip10')
+    )
+    
+then
+    Advice advice = new Advice('positive', $req.getName() );
+    insert(advice);
+    //System.out.println( "ABAC4 Positive Advice for request: "+$req.getName());
+end    
+    
+
+rule "ABAC4 Negation"
+
+when    
+    
+    $req: InstanceOfClazz( clazz.name =='Request')    
+    
+    $pred1: ObjectProperty( name == 'requestHasSubject' )
+    $pred2: ObjectProperty( name == 'requestHasObject' )
+    $pred3: ObjectProperty( name == 'requestHasAction' )   
+    $pred4: ObjectProperty( name == 'requestHasIP' )   
+    
+    $tr1: KnowledgeTriple( subject == $req , predicate == $pred1 , $object1: object)      
+    $tr2: KnowledgeTriple( subject == $req , predicate == $pred2 , $object2: object)          
+    $tr3: KnowledgeTriple( subject == $req , predicate == $pred3 , $object3: object)          
+    $tr4: KnowledgeTriple( subject == $req , predicate == $pred4 , $object4: object)          
+    
+    not (
+        eval ($object1.getName() == 'requestor4')   and
+        eval ($object2.getName() == 'resource1')    and
+        eval ($object3.getName() == 'action1')      and (
+            //expression
+        eval ($object4.getName() == 'ip1') or eval ($object4.getName() == 'ip2') or eval ($object4.getName() == 'ip3') or eval ($object4.getName() == 'ip4') or eval ($object4.getName() == 'ip5') or eval ($object4.getName() == 'ip6') or eval ($object4.getName() == 'ip7') or eval ($object4.getName() == 'ip8') or eval ($object4.getName() == 'ip9') or eval ($object4.getName() == 'ip10')
+        )
+    )
+then
+    Advice advice = new Advice('negative', $req.getName() );
+    insert(advice);
+    //System.out.println( "ABAC4 Negative Advice for request: "+$req.getName());
+end         
+
+rule "ABAC5 Rule"
+
+when    
+    
+    $req: InstanceOfClazz( clazz.name =='Request')    
+    
+    $pred1: ObjectProperty( name == 'requestHasSubject' )
+    $pred2: ObjectProperty( name == 'requestHasObject' )
+    $pred3: ObjectProperty( name == 'requestHasAction' )   
+    $pred4: ObjectProperty( name == 'requestHasIP' )   
+    
+    $tr1: KnowledgeTriple( subject == $req , predicate == $pred1 , $object1: object)      
+    $tr2: KnowledgeTriple( subject == $req , predicate == $pred2 , $object2: object)          
+    $tr3: KnowledgeTriple( subject == $req , predicate == $pred3 , $object3: object)          
+    $tr4: KnowledgeTriple( subject == $req , predicate == $pred4 , $object4: object)          
+    
+    
+    eval ($object1.getName() == 'requestor5')   and
+    eval ($object2.getName() == 'resource1')    and
+    eval ($object3.getName() == 'action1')      and (
+        //expression
+        eval ($object4.getName() == 'ip1') or eval ($object4.getName() == 'ip2') or eval ($object4.getName() == 'ip3') or eval ($object4.getName() == 'ip4') or eval ($object4.getName() == 'ip5') or eval ($object4.getName() == 'ip6') or eval ($object4.getName() == 'ip7') or eval ($object4.getName() == 'ip8') or eval ($object4.getName() == 'ip9') or eval ($object4.getName() == 'ip10')
+    )
+    
+then
+    Advice advice = new Advice('positive', $req.getName() );
+    insert(advice);
+    //System.out.println( "ABAC5 Positive Advice for request: "+$req.getName());
+end    
+    
+
+rule "ABAC5 Negation"
+
+when    
+    
+    $req: InstanceOfClazz( clazz.name =='Request')    
+    
+    $pred1: ObjectProperty( name == 'requestHasSubject' )
+    $pred2: ObjectProperty( name == 'requestHasObject' )
+    $pred3: ObjectProperty( name == 'requestHasAction' )   
+    $pred4: ObjectProperty( name == 'requestHasIP' )   
+    
+    $tr1: KnowledgeTriple( subject == $req , predicate == $pred1 , $object1: object)      
+    $tr2: KnowledgeTriple( subject == $req , predicate == $pred2 , $object2: object)          
+    $tr3: KnowledgeTriple( subject == $req , predicate == $pred3 , $object3: object)          
+    $tr4: KnowledgeTriple( subject == $req , predicate == $pred4 , $object4: object)          
+    
+    not (
+        eval ($object1.getName() == 'requestor5')   and
+        eval ($object2.getName() == 'resource1')    and
+        eval ($object3.getName() == 'action1')      and (
+            //expression
+        eval ($object4.getName() == 'ip1') or eval ($object4.getName() == 'ip2') or eval ($object4.getName() == 'ip3') or eval ($object4.getName() == 'ip4') or eval ($object4.getName() == 'ip5') or eval ($object4.getName() == 'ip6') or eval ($object4.getName() == 'ip7') or eval ($object4.getName() == 'ip8') or eval ($object4.getName() == 'ip9') or eval ($object4.getName() == 'ip10')
+        )
+    )
+then
+    Advice advice = new Advice('negative', $req.getName() );
+    insert(advice);
+    //System.out.println( "ABAC5 Negative Advice for request: "+$req.getName());
+end         
+
+
+
+rule "ABAC6 Rule"
+
+when    
+    
+    $req: InstanceOfClazz( clazz.name =='Request')    
+    
+    $pred1: ObjectProperty( name == 'requestHasSubject' )
+    $pred2: ObjectProperty( name == 'requestHasObject' )
+    $pred3: ObjectProperty( name == 'requestHasAction' )   
+    $pred4: ObjectProperty( name == 'requestHasIP' )   
+    
+    $tr1: KnowledgeTriple( subject == $req , predicate == $pred1 , $object1: object)      
+    $tr2: KnowledgeTriple( subject == $req , predicate == $pred2 , $object2: object)          
+    $tr3: KnowledgeTriple( subject == $req , predicate == $pred3 , $object3: object)          
+    $tr4: KnowledgeTriple( subject == $req , predicate == $pred4 , $object4: object)          
+    
+    
+    eval ($object1.getName() == 'requestor6')   and
+    eval ($object2.getName() == 'resource1')    and
+    eval ($object3.getName() == 'action1')      and (
+        //expression
+        eval ($object4.getName() == 'ip1') or eval ($object4.getName() == 'ip2') or eval ($object4.getName() == 'ip3') or eval ($object4.getName() == 'ip4') or eval ($object4.getName() == 'ip5') or eval ($object4.getName() == 'ip6') or eval ($object4.getName() == 'ip7') or eval ($object4.getName() == 'ip8') or eval ($object4.getName() == 'ip9') or eval ($object4.getName() == 'ip10')
+    )
+    
+then
+    Advice advice = new Advice('positive', $req.getName() );
+    insert(advice);
+    //System.out.println( "ABAC6 Positive Advice for request: "+$req.getName());
+end    
+    
+
+rule "ABAC6 Negation"
+
+when    
+    
+    $req: InstanceOfClazz( clazz.name =='Request')    
+    
+    $pred1: ObjectProperty( name == 'requestHasSubject' )
+    $pred2: ObjectProperty( name == 'requestHasObject' )
+    $pred3: ObjectProperty( name == 'requestHasAction' )   
+    $pred4: ObjectProperty( name == 'requestHasIP' )   
+    
+    $tr1: KnowledgeTriple( subject == $req , predicate == $pred1 , $object1: object)      
+    $tr2: KnowledgeTriple( subject == $req , predicate == $pred2 , $object2: object)          
+    $tr3: KnowledgeTriple( subject == $req , predicate == $pred3 , $object3: object)          
+    $tr4: KnowledgeTriple( subject == $req , predicate == $pred4 , $object4: object)          
+    
+    not (
+        eval ($object1.getName() == 'requestor6')   and
+        eval ($object2.getName() == 'resource1')    and
+        eval ($object3.getName() == 'action1')      and (
+            //expression
+        eval ($object4.getName() == 'ip1') or eval ($object4.getName() == 'ip2') or eval ($object4.getName() == 'ip3') or eval ($object4.getName() == 'ip4') or eval ($object4.getName() == 'ip5') or eval ($object4.getName() == 'ip6') or eval ($object4.getName() == 'ip7') or eval ($object4.getName() == 'ip8') or eval ($object4.getName() == 'ip9') or eval ($object4.getName() == 'ip10')
+        )
+    )
+then
+    Advice advice = new Advice('negative', $req.getName() );
+    insert(advice);
+    //System.out.println( "ABAC6 Negative Advice for request: "+$req.getName());
+end         
+
+rule "ABAC7 Rule"
+
+when    
+    
+    $req: InstanceOfClazz( clazz.name =='Request')    
+    
+    $pred1: ObjectProperty( name == 'requestHasSubject' )
+    $pred2: ObjectProperty( name == 'requestHasObject' )
+    $pred3: ObjectProperty( name == 'requestHasAction' )   
+    $pred4: ObjectProperty( name == 'requestHasIP' )   
+    
+    $tr1: KnowledgeTriple( subject == $req , predicate == $pred1 , $object1: object)      
+    $tr2: KnowledgeTriple( subject == $req , predicate == $pred2 , $object2: object)          
+    $tr3: KnowledgeTriple( subject == $req , predicate == $pred3 , $object3: object)          
+    $tr4: KnowledgeTriple( subject == $req , predicate == $pred4 , $object4: object)          
+    
+    
+    eval ($object1.getName() == 'requestor7')   and
+    eval ($object2.getName() == 'resource1')    and
+    eval ($object3.getName() == 'action1')      and (
+        //expression
+        eval ($object4.getName() == 'ip1') or eval ($object4.getName() == 'ip2') or eval ($object4.getName() == 'ip3') or eval ($object4.getName() == 'ip4') or eval ($object4.getName() == 'ip5') or eval ($object4.getName() == 'ip6') or eval ($object4.getName() == 'ip7') or eval ($object4.getName() == 'ip8') or eval ($object4.getName() == 'ip9') or eval ($object4.getName() == 'ip10')
+    )
+    
+then
+    Advice advice = new Advice('positive', $req.getName() );
+    insert(advice);
+    //System.out.println( "ABAC7 Positive Advice for request: "+$req.getName());
+end    
+    
+
+rule "ABAC7 Negation"
+
+when    
+    
+    $req: InstanceOfClazz( clazz.name =='Request')    
+    
+    $pred1: ObjectProperty( name == 'requestHasSubject' )
+    $pred2: ObjectProperty( name == 'requestHasObject' )
+    $pred3: ObjectProperty( name == 'requestHasAction' )   
+    $pred4: ObjectProperty( name == 'requestHasIP' )   
+    
+    $tr1: KnowledgeTriple( subject == $req , predicate == $pred1 , $object1: object)      
+    $tr2: KnowledgeTriple( subject == $req , predicate == $pred2 , $object2: object)          
+    $tr3: KnowledgeTriple( subject == $req , predicate == $pred3 , $object3: object)          
+    $tr4: KnowledgeTriple( subject == $req , predicate == $pred4 , $object4: object)          
+    
+    not (
+        eval ($object1.getName() == 'requestor7')   and
+        eval ($object2.getName() == 'resource1')    and
+        eval ($object3.getName() == 'action1')      and (
+            //expression
+        eval ($object4.getName() == 'ip1') or eval ($object4.getName() == 'ip2') or eval ($object4.getName() == 'ip3') or eval ($object4.getName() == 'ip4') or eval ($object4.getName() == 'ip5') or eval ($object4.getName() == 'ip6') or eval ($object4.getName() == 'ip7') or eval ($object4.getName() == 'ip8') or eval ($object4.getName() == 'ip9') or eval ($object4.getName() == 'ip10')
+        )
+    )
+then
+    Advice advice = new Advice('negative', $req.getName() );
+    insert(advice);
+    //System.out.println( "ABAC7 Negative Advice for request: "+$req.getName());
+end         
+
+rule "ABAC8 Rule"
+
+when    
+    
+    $req: InstanceOfClazz( clazz.name =='Request')    
+    
+    $pred1: ObjectProperty( name == 'requestHasSubject' )
+    $pred2: ObjectProperty( name == 'requestHasObject' )
+    $pred3: ObjectProperty( name == 'requestHasAction' )   
+    $pred4: ObjectProperty( name == 'requestHasIP' )   
+    
+    $tr1: KnowledgeTriple( subject == $req , predicate == $pred1 , $object1: object)      
+    $tr2: KnowledgeTriple( subject == $req , predicate == $pred2 , $object2: object)          
+    $tr3: KnowledgeTriple( subject == $req , predicate == $pred3 , $object3: object)          
+    $tr4: KnowledgeTriple( subject == $req , predicate == $pred4 , $object4: object)          
+    
+    
+    eval ($object1.getName() == 'requestor8')   and
+    eval ($object2.getName() == 'resource1')    and
+    eval ($object3.getName() == 'action1')      and (
+        //expression
+        eval ($object4.getName() == 'ip1') or eval ($object4.getName() == 'ip2') or eval ($object4.getName() == 'ip3') or eval ($object4.getName() == 'ip4') or eval ($object4.getName() == 'ip5') or eval ($object4.getName() == 'ip6') or eval ($object4.getName() == 'ip7') or eval ($object4.getName() == 'ip8') or eval ($object4.getName() == 'ip9') or eval ($object4.getName() == 'ip10')
+    )
+    
+then
+    Advice advice = new Advice('positive', $req.getName() );
+    insert(advice);
+    //System.out.println( "ABAC8 Positive Advice for request: "+$req.getName());
+end    
+    
+
+rule "ABAC8 Negation"
+
+when    
+    
+    $req: InstanceOfClazz( clazz.name =='Request')    
+    
+    $pred1: ObjectProperty( name == 'requestHasSubject' )
+    $pred2: ObjectProperty( name == 'requestHasObject' )
+    $pred3: ObjectProperty( name == 'requestHasAction' )   
+    $pred4: ObjectProperty( name == 'requestHasIP' )   
+    
+    $tr1: KnowledgeTriple( subject == $req , predicate == $pred1 , $object1: object)      
+    $tr2: KnowledgeTriple( subject == $req , predicate == $pred2 , $object2: object)          
+    $tr3: KnowledgeTriple( subject == $req , predicate == $pred3 , $object3: object)          
+    $tr4: KnowledgeTriple( subject == $req , predicate == $pred4 , $object4: object)          
+    
+    not (
+        eval ($object1.getName() == 'requestor8')   and
+        eval ($object2.getName() == 'resource1')    and
+        eval ($object3.getName() == 'action1')      and (
+            //expression
+        eval ($object4.getName() == 'ip1') or eval ($object4.getName() == 'ip2') or eval ($object4.getName() == 'ip3') or eval ($object4.getName() == 'ip4') or eval ($object4.getName() == 'ip5') or eval ($object4.getName() == 'ip6') or eval ($object4.getName() == 'ip7') or eval ($object4.getName() == 'ip8') or eval ($object4.getName() == 'ip9') or eval ($object4.getName() == 'ip10')
+        )
+    )
+then
+    Advice advice = new Advice('negative', $req.getName() );
+    insert(advice);
+    //System.out.println( "ABAC8 Negative Advice for request: "+$req.getName());
+end         
+
+rule "ABAC9 Rule"
+
+when    
+    
+    $req: InstanceOfClazz( clazz.name =='Request')    
+    
+    $pred1: ObjectProperty( name == 'requestHasSubject' )
+    $pred2: ObjectProperty( name == 'requestHasObject' )
+    $pred3: ObjectProperty( name == 'requestHasAction' )   
+    $pred4: ObjectProperty( name == 'requestHasIP' )   
+    
+    $tr1: KnowledgeTriple( subject == $req , predicate == $pred1 , $object1: object)      
+    $tr2: KnowledgeTriple( subject == $req , predicate == $pred2 , $object2: object)          
+    $tr3: KnowledgeTriple( subject == $req , predicate == $pred3 , $object3: object)          
+    $tr4: KnowledgeTriple( subject == $req , predicate == $pred4 , $object4: object)          
+    
+    
+    eval ($object1.getName() == 'requestor9')   and
+    eval ($object2.getName() == 'resource1')    and
+    eval ($object3.getName() == 'action1')      and (
+        //expression
+        eval ($object4.getName() == 'ip1') or eval ($object4.getName() == 'ip2') or eval ($object4.getName() == 'ip3') or eval ($object4.getName() == 'ip4') or eval ($object4.getName() == 'ip5') or eval ($object4.getName() == 'ip6') or eval ($object4.getName() == 'ip7') or eval ($object4.getName() == 'ip8') or eval ($object4.getName() == 'ip9') or eval ($object4.getName() == 'ip10')
+    )
+    
+then
+    Advice advice = new Advice('positive', $req.getName() );
+    insert(advice);
+    //System.out.println( "ABAC9 Positive Advice for request: "+$req.getName());
+end    
+    
+
+rule "ABAC9 Negation"
+
+when    
+    
+    $req: InstanceOfClazz( clazz.name =='Request')    
+    
+    $pred1: ObjectProperty( name == 'requestHasSubject' )
+    $pred2: ObjectProperty( name == 'requestHasObject' )
+    $pred3: ObjectProperty( name == 'requestHasAction' )   
+    $pred4: ObjectProperty( name == 'requestHasIP' )   
+    
+    $tr1: KnowledgeTriple( subject == $req , predicate == $pred1 , $object1: object)      
+    $tr2: KnowledgeTriple( subject == $req , predicate == $pred2 , $object2: object)          
+    $tr3: KnowledgeTriple( subject == $req , predicate == $pred3 , $object3: object)          
+    $tr4: KnowledgeTriple( subject == $req , predicate == $pred4 , $object4: object)          
+    
+    not (
+        eval ($object1.getName() == 'requestor9')   and
+        eval ($object2.getName() == 'resource1')    and
+        eval ($object3.getName() == 'action1')      and (
+            //expression
+        eval ($object4.getName() == 'ip1') or eval ($object4.getName() == 'ip2') or eval ($object4.getName() == 'ip3') or eval ($object4.getName() == 'ip4') or eval ($object4.getName() == 'ip5') or eval ($object4.getName() == 'ip6') or eval ($object4.getName() == 'ip7') or eval ($object4.getName() == 'ip8') or eval ($object4.getName() == 'ip9') or eval ($object4.getName() == 'ip10')
+        )
+    )
+then
+    Advice advice = new Advice('negative', $req.getName() );
+    insert(advice);
+    //System.out.println( "ABAC9 Negative Advice for request: "+$req.getName());
+end         
+
+rule "ABAC10 Rule"
+
+when    
+    
+    $req: InstanceOfClazz( clazz.name =='Request')    
+    
+    $pred1: ObjectProperty( name == 'requestHasSubject' )
+    $pred2: ObjectProperty( name == 'requestHasObject' )
+    $pred3: ObjectProperty( name == 'requestHasAction' )   
+    $pred4: ObjectProperty( name == 'requestHasIP' )   
+    
+    $tr1: KnowledgeTriple( subject == $req , predicate == $pred1 , $object1: object)      
+    $tr2: KnowledgeTriple( subject == $req , predicate == $pred2 , $object2: object)          
+    $tr3: KnowledgeTriple( subject == $req , predicate == $pred3 , $object3: object)          
+    $tr4: KnowledgeTriple( subject == $req , predicate == $pred4 , $object4: object)          
+    
+    
+    eval ($object1.getName() == 'requestor10')   and
+    eval ($object2.getName() == 'resource1')    and
+    eval ($object3.getName() == 'action1')      and (
+        //expression
+        eval ($object4.getName() == 'ip1') or eval ($object4.getName() == 'ip2') or eval ($object4.getName() == 'ip3') or eval ($object4.getName() == 'ip4') or eval ($object4.getName() == 'ip5') or eval ($object4.getName() == 'ip6') or eval ($object4.getName() == 'ip7') or eval ($object4.getName() == 'ip8') or eval ($object4.getName() == 'ip9') or eval ($object4.getName() == 'ip10')
+    )
+    
+then
+    Advice advice = new Advice('positive', $req.getName() );
+    insert(advice);
+    //System.out.println( "ABAC10 Positive Advice for request: "+$req.getName());
+end    
+    
+
+rule "ABAC10 Negation"
+
+when    
+    
+    $req: InstanceOfClazz( clazz.name =='Request')    
+    
+    $pred1: ObjectProperty( name == 'requestHasSubject' )
+    $pred2: ObjectProperty( name == 'requestHasObject' )
+    $pred3: ObjectProperty( name == 'requestHasAction' )   
+    $pred4: ObjectProperty( name == 'requestHasIP' )   
+    
+    $tr1: KnowledgeTriple( subject == $req , predicate == $pred1 , $object1: object)      
+    $tr2: KnowledgeTriple( subject == $req , predicate == $pred2 , $object2: object)          
+    $tr3: KnowledgeTriple( subject == $req , predicate == $pred3 , $object3: object)          
+    $tr4: KnowledgeTriple( subject == $req , predicate == $pred4 , $object4: object)          
+    
+    not (
+        eval ($object1.getName() == 'requestor10')   and
+        eval ($object2.getName() == 'resource1')    and
+        eval ($object3.getName() == 'action1')      and (
+            //expression
+        eval ($object4.getName() == 'ip1') or eval ($object4.getName() == 'ip2') or eval ($object4.getName() == 'ip3') or eval ($object4.getName() == 'ip4') or eval ($object4.getName() == 'ip5') or eval ($object4.getName() == 'ip6') or eval ($object4.getName() == 'ip7') or eval ($object4.getName() == 'ip8') or eval ($object4.getName() == 'ip9') or eval ($object4.getName() == 'ip10')
+        )
+    )
+then
+    Advice advice = new Advice('negative', $req.getName() );
+    insert(advice);
+    //System.out.println( "ABAC10 Negative Advice for request: "+$req.getName());
+end         
